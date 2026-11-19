@@ -11,6 +11,10 @@ New features
   dataset, when the offset is the image of the first element of a chunk of one
   source dataset under a mapping that is a plain translation. They return the
   source chunk.
+* With a threadsafe HDF5, :meth:`h5py.h5d.DatasetID.read_direct_chunk` lets
+  other threads use h5py while it reads the chunk, so direct chunk reads from
+  several threads overlap. With HDF5 2.4 or later the library also releases its
+  own lock during the read, for read-only files on the default (sec2) driver.
 
 Exposing HDF5 functions
 -----------------------
@@ -18,3 +22,4 @@ Exposing HDF5 functions
 * ``H5Dread_chunk2``
 * ``H5Pset_sub_chunk``
 * ``H5Pget_sub_chunk``
+* ``H5is_library_threadsafe``

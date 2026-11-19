@@ -50,6 +50,25 @@ cdef BogoLock _phil = BogoLock()
 # Python alias for access from other modules
 phil = _phil
 
+cdef bint phil_release_outermost():
+    """ Release phil if this thread holds it exactly once, so that another
+    thread can call into h5py while this one waits on a blocking HDF5 call.
+    Return whether it was released; if so, call phil_reacquire() after.
+    A nested hold, or the free-threading and lock-free builds, keep phil.
+    """
+    ### {{if OBJECTS_USE_LOCKING and not FREE_THREADING}}
+    if _phil._count == 1 and _phil._is_owned():
+        _phil.release()
+        return True
+    ### {{endif}}
+    return False
+
+cdef void phil_reacquire():
+    """ Take phil back after phil_release_outermost() released it. """
+    ### {{if OBJECTS_USE_LOCKING and not FREE_THREADING}}
+    _phil.acquire()
+    ### {{endif}}
+
 def with_phil(func):
     """ Locking decorator """
 

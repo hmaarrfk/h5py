@@ -20,6 +20,8 @@ cdef class ObjectID:
 # Convenience functions
 cdef hid_t pdefault(ObjectID pid)
 cdef int is_h5py_obj_valid(ObjectID obj)
+cdef bint phil_release_outermost()
+cdef void phil_reacquire()
 
 # Inheritance scheme (for top-level cimport and import statements):
 #

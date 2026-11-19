@@ -40,6 +40,7 @@ hdf5:
   herr_t    H5get_libversion(unsigned *majnum, unsigned *minnum, unsigned *relnum)
   herr_t    H5check_version(unsigned majnum, unsigned minnum, unsigned relnum )
   herr_t    H5free_memory(void *mem)
+  herr_t    H5is_library_threadsafe(hbool_t *is_ts)
 
   # === H5A - Attributes API ==================================================
 

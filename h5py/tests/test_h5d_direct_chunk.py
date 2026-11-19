@@ -1,3 +1,5 @@
+import threading
+
 import h5py
 import numpy
 import numpy.testing
@@ -240,3 +242,61 @@ def test_read_direct_chunk_virtual(tmp_path):
             assert info.size == len(expected[1])
         with pytest.raises(RuntimeError, match="not the image of the first element"):
             dataset.id.read_direct_chunk((0, 1, 0))
+
+
+@pytest.mark.skipif(
+    h5py.version.hdf5_version_tuple < (2, 4, 0),
+    reason="Sub-chunk reads need HDF5 2.4",
+)
+def test_read_direct_chunk_threads(tmp_path):
+    frames = numpy.arange(8 * 64 * 64, dtype='uint16').reshape(8, 64, 64)
+    layout = h5py.VirtualLayout(frames.shape, frames.dtype)
+    with h5py.File(tmp_path / 'stack.h5', 'w') as f:
+        f.create_dataset('data', data=frames, chunks=(1, 64, 64), compression='gzip')
+    for index, frame in enumerate(frames):
+        with h5py.File(tmp_path / f'frame{index}.h5', 'w') as f:
+            f.create_dataset('data', data=frame, chunks=frame.shape, compression='gzip')
+        layout[index] = h5py.VirtualSource(f'frame{index}.h5', 'data', shape=frame.shape)
+    with h5py.File(tmp_path / 'vds.h5', 'w') as f:
+        f.create_virtual_dataset('data', layout)
+
+    stack_file = h5py.File(tmp_path / 'stack.h5', 'r')
+    vds_file = h5py.File(tmp_path / 'vds.h5', 'r')
+    datasets = [stack_file['data'], vds_file['data']]
+    offsets = [(index, 0, 0) for index in range(len(frames))]
+    expected = [[d.id.read_direct_chunk(o)[1] for o in offsets] for d in datasets]
+    dxpl = h5py.h5p.create(h5py.h5p.DATASET_XFER)
+    dxpl.set_sub_chunk(3, 20)
+    errors = []
+    stop = threading.Event()
+
+    def read():
+        try:
+            for _ in range(50):
+                for dataset, chunks in zip(datasets, expected):
+                    for offset, chunk in zip(offsets, chunks):
+                        assert dataset.id.read_direct_chunk(offset) == (0, chunk)
+                        assert dataset.id.read_direct_chunk(offset, dxpl=dxpl) == (0, chunk[3:23])
+        except Exception as error:
+            errors.append(error)
+
+    def reopen():
+        try:
+            while not stop.is_set():
+                with h5py.File(tmp_path / 'stack.h5', 'r') as f:
+                    assert f['data'].id.read_direct_chunk((0, 0, 0))[1] == expected[0][0]
+        except Exception as error:
+            errors.append(error)
+
+    readers = [threading.Thread(target=read) for _ in range(4)]
+    closer = threading.Thread(target=reopen)
+    closer.start()
+    for thread in readers:
+        thread.start()
+    for thread in readers:
+        thread.join()
+    stop.set()
+    closer.join()
+    stack_file.close()
+    vds_file.close()
+    assert errors == []

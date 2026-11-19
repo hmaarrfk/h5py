@@ -24,6 +24,7 @@ from ._proxy cimport dset_rw, dset_rw_vlen_strings
 
 from collections import namedtuple
 from ._objects import phil, with_phil
+from ._objects cimport phil_release_outermost, phil_reacquire
 from cpython cimport PyBUF_ANY_CONTIGUOUS, \
                      PyBuffer_Release, \
                      PyBytes_AsString, \
@@ -33,6 +34,17 @@ from cpython cimport PyBUF_ANY_CONTIGUOUS, \
 
 # Initialization
 import_array()
+
+cdef int _library_threadsafe = -1
+
+cdef bint library_threadsafe():
+    """ Whether HDF5 serializes its own calls, checked once """
+    global _library_threadsafe
+    cdef hbool_t is_ts = 0
+    if _library_threadsafe < 0:
+        H5is_library_threadsafe(&is_ts)
+        _library_threadsafe = 1 if is_ts else 0
+    return _library_threadsafe
 
 # === Public constants and data structures ====================================
 
@@ -562,6 +574,9 @@ cdef class DatasetID(ObjectID):
         With HDF5 2.4 or later, a `dxpl` with a byte range set by
         `PropDXID.set_sub_chunk` reads only that range of the stored chunk,
         and `out` need only hold the range.
+
+        With a threadsafe HDF5, other threads can use h5py while the chunk
+        is read.
         """
         cdef hid_t dset_id
         cdef hid_t dxpl_id
@@ -573,6 +588,7 @@ cdef class DatasetID(ObjectID):
         cdef size_t buf_size
         cdef size_t sub_chunk_offset = 0
         cdef size_t sub_chunk_size = 0
+        cdef bint released = False
         cdef int nb_offsets = len(offsets)
         cdef void * chunk_buffer
 
@@ -614,7 +630,12 @@ cdef class DatasetID(ObjectID):
             ### {{if HDF5_VERSION >= (2, 0, 0)}}
             buf_size = chunk_bytes
             try:
-                H5Dread_chunk2(dset_id, dxpl_id, offset, &filters, chunk_buffer, &buf_size)
+                released = library_threadsafe() and phil_release_outermost()
+                try:
+                    H5Dread_chunk2(dset_id, dxpl_id, offset, &filters, chunk_buffer, &buf_size)
+                finally:
+                    if released:
+                        phil_reacquire()
             except Exception:
                 if sub_chunk_size > 0:
                     H5Dget_chunk_storage_size(dset_id, offset, &stored_bytes)
